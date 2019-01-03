@@ -10,21 +10,39 @@ definition(
 )
 
 preferences {
-	section("Choose a temperature sensor(s)... (If multiple sensors are selected, the average value will be used)"){
-		input "sensors", "capability.temperatureMeasurement", title: "Sensor", multiple: true
+	page(name:"Settings", title:"Settings", uninstall:true, install:true ) {
+        section("Choose a temperature sensor(s)... (If multiple sensors are selected, the average value will be used)"){
+            input "sensors", "capability.temperatureMeasurement", title: "Sensor", multiple: true
+        }
+        section("Select the heater outlet(s)... "){
+            input "outlets", "capability.switch", title: "Outlets", multiple: true
+        }
+        section("Only heat when contact isnt open (optional, leave blank to not require contact sensor)..."){
+            input "motion", "capability.contactSensor", title: "Contact", required: false
+        }
+        section ("Scheduled Setpoints", hideable: true, hidden: true) {
+            input (name:"numscheduled", title: "Number of scheduled setpoints", type: "number", refreshAfterSelection: true)
+            href(title: "Schedule Setpoints", page: "ScheduledChanges")
+        }
+        section("Never go below this temperature: (optional)"){
+            input "emergencySetpoint", "decimal", title: "Emergency Temp", required: false
+        }
+        section("Temperature Threshold (Don't allow heating to go above or below this amount from set temperature)") {
+            input "threshold", "decimal", "title": "Temperature Threshold", required: false, defaultValue: 1.0
+        }
 	}
-	section("Select the heater outlet(s)... "){
-		input "outlets", "capability.switch", title: "Outlets", multiple: true
-	}
-	section("Only heat when contact isnt open (optional, leave blank to not require contact sensor)..."){
-		input "motion", "capability.contactSensor", title: "Contact", required: false
-	}
-	section("Never go below this temperature: (optional)"){
-		input "emergencySetpoint", "decimal", title: "Emergency Temp", required: false
-	}
-	section("Temperature Threshold (Don't allow heating to go above or bellow this amount from set temperature)") {
-		input "threshold", "decimal", "title": "Temperature Threshold", required: false, defaultValue: 1.0
-	}
+    page(name: "ScheduledChanges")
+}
+
+def ScheduledChanges() {
+    dynamicPage(name: "ScheduledChanges", uninstall: true, install: false) {
+        for (int i = 1; i <= settings.numscheduled; i++) {
+            section("Scheduled Setpoint $i") {
+                input "scheduleTime${i}", "time", title: "At this time:", required: true
+                input "scheduleSetpoint${i}", "decimal", title: "Set this temperature:", required: true
+            }
+        }
+    }
 }
 
 def installed()
@@ -97,6 +115,7 @@ def updated()
     thermostat.clearSensorData()
     thermostat.setVirtualTemperature(getAverageTemperature())
 	thermostat.setTemperatureScale(parent.getTempScale())
+    runEvery5Minutes(updateSetpointBySchedule)
     runEvery1Hour(updateTimings)
 }
 
@@ -179,6 +198,26 @@ private evaluate(currentTemp, desiredTemp)
 		heatingOff()
 	} else if(state.current == "on") {
         updateTimings()
+    }
+}
+
+def updateSetpointBySchedule() {
+    log.debug "Update setpoint based on schedule."
+	def thermostat = getThermostat()
+	def timeNow = now()
+    def newSetpoint = null
+   
+	for (int i = 1; i <= settings.numscheduled; i++) {
+    	def scheduledTime = timeToday(settings["scheduleTime$i"], location.timeZone)
+ 		if (scheduledTime != null) {
+	    	if (scheduledTime.time <= timeNow) {
+    	        newSetpoint = settings["scheduleSetpoint$i"]
+			}
+		}
+	}
+    if (newSetpoint != null) {
+		log.debug "Changing setpoint to $newSetpoint based on schedule."
+    	thermostat.setHeatingSetpoint(newSetpoint.toString())
     }
 }
 
